@@ -3,7 +3,7 @@ import { expect } from "chai";
 import sinon from "sinon";
 import { ServerAuthorizationTokenResponse } from "../../src/response/ServerAuthorizationTokenResponse";
 import { ResponseHandler } from "../../src/response/ResponseHandler";
-import { AUTHENTICATION_RESULT, RANDOM_TEST_GUID, TEST_CONFIG, ID_TOKEN_CLAIMS, TEST_DATA_CLIENT_INFO, TEST_STATE_VALUES } from "../utils/StringConstants";
+import { AUTHENTICATION_RESULT, RANDOM_TEST_GUID, TEST_CONFIG, ID_TOKEN_CLAIMS, TEST_DATA_CLIENT_INFO, TEST_STATE_VALUES, TEST_ACCOUNT_INFO } from "../utils/StringConstants";
 import { Authority } from "../../src/authority/Authority";
 import { INetworkModule, NetworkRequestOptions } from "../../src/network/INetworkModule";
 import { CacheManager } from "../../src/cache/CacheManager";
@@ -11,7 +11,7 @@ import { ICrypto, PkceCodes } from "../../src/crypto/ICrypto";
 import { IdToken } from "../../src/account/IdToken";
 import { IdTokenClaims } from "../../src/account/IdTokenClaims";
 import { ClientTestUtils } from "../client/ClientTestUtils";
-import { AccountEntity, TrustedAuthority, ClientAuthError, ClientAuthErrorMessage, InteractionRequiredAuthError, ServerError } from "../../src";
+import { AccountEntity, TrustedAuthority, ClientAuthError, ClientAuthErrorMessage, InteractionRequiredAuthError, ServerError, RefreshTokenEntity } from "../../src";
 import { ServerAuthorizationCodeResponse } from "../../src/server/ServerAuthorizationCodeResponse";
 import { buildClientInfo } from "../../src/account/ClientInfo";
 
@@ -45,7 +45,7 @@ const cryptoInterface: ICrypto = {
             verifier: TEST_CONFIG.TEST_VERIFIER,
         };
     },
-}
+};
 
 let store = {};
 class TestCacheManager extends CacheManager {
@@ -76,7 +76,7 @@ class TestCacheManager extends CacheManager {
 }
 const testCacheManager = new TestCacheManager;
 
-let authority = new Authority("https://login.microsoftonline.com/common", networkInterface);
+const authority = new Authority("https://login.microsoftonline.com/common", networkInterface);
 
 describe("ResponseHandler.ts", () => {
     beforeEach(() => {
@@ -94,8 +94,32 @@ describe("ResponseHandler.ts", () => {
     });
 
     afterEach(() => {
+        testCacheManager.clear();
         sinon.restore();
-    })
+    });
+
+    describe("handleBrokeredServerTokenResponse", () => {
+        it("caches refresh token and returns the idToken and accessToken in the response", () => {
+            const testResponse: ServerAuthorizationTokenResponse = {...AUTHENTICATION_RESULT.body};
+            const responseHandler = new ResponseHandler("this-is-a-client-id", testCacheManager, cryptoInterface, null);
+
+            const cacheRefreshTokenStub = sinon.stub(CacheManager.prototype, "saveCredential");
+
+            const response = responseHandler.handleBrokeredServerTokenResponse(testResponse, authority);
+
+            // Validate id_token and access_token are passed down to embedded app
+            expect(response.tokensToCache.idToken.secret).to.eq(AUTHENTICATION_RESULT.body.id_token);
+            expect(response.tokensToCache.accessToken.secret).to.eq(AUTHENTICATION_RESULT.body.access_token);
+            expect(response.tokensToCache.refreshToken).to.be.null;
+
+            // Validate RT was saved in top frame (Broker)
+            expect(cacheRefreshTokenStub.calledOnce).to.be.true;
+            const actualRtSaved = cacheRefreshTokenStub.lastCall.lastArg; // This is what was passed to saveCredential
+            expect(RefreshTokenEntity.isRefreshTokenEntity(actualRtSaved)).to.be.true;
+            expect(actualRtSaved.secret).to.eq(AUTHENTICATION_RESULT.body.refresh_token);
+        });
+        
+    });
 
     describe("generateCacheRecord", () => {
         it("throws invalid cache environment error", (done) => {

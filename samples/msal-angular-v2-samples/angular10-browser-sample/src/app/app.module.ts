@@ -44,7 +44,7 @@ function MSALInterceptorConfigFactory(): MsalInterceptorConfig {
     ProfileComponent
   ],
   imports: [
-    BrowserModule,
+    BrowserModule.withServerTransition({ appId: 'serverApp' }),
     BrowserAnimationsModule,
     AppRoutingModule,
     MatButtonModule,
